@@ -19,6 +19,7 @@ const (
 	TileMonster
 	TileChest
 	TileTrap
+	TileFountain
 )
 
 type Tile struct {
@@ -27,20 +28,25 @@ type Tile struct {
 }
 
 type Player struct {
-	HP, MaxHP int
-	ATK, DEF  int
-	Gold      int
-	Kills     int
-	X, Y      int
-	Defending bool
+	HP, MaxHP   int
+	ATK, DEF    int
+	Gold        int
+	Kills       int
+	X, Y        int
+	Defending   bool
+	HeavyActive bool
+	SkillCD     map[string]int
+	Level       int
 }
 
 type Monster struct {
-	Name string
-	HP   int
-	Max  int
-	ATK  int
-	Gold int
+	Name    string
+	HP      int
+	Max     int
+	ATK     int
+	BaseATK int
+	Gold    int
+	Rage    int
 }
 
 var reader = bufio.NewReader(os.Stdin)
@@ -48,7 +54,34 @@ var reader = bufio.NewReader(os.Stdin)
 func main() {
 	rand.Seed(time.Now().UnixNano())
 	for {
-		runGame()
+		player := Player{
+			HP: 50, MaxHP: 50,
+			ATK: 10, DEF: 5,
+			Gold: 0, Kills: 0,
+			X: 0, Y: 0,
+			SkillCD: make(map[string]int),
+			Level:   1,
+		}
+		gameOver := false
+		for !gameOver {
+			won := runLevel(&player)
+			if !won {
+				printLose(player)
+				gameOver = true
+			} else {
+				PrintGrade(player, player.Level)
+				fmt.Print("  按回车进入下一关，输入q退出: ")
+				input, _ := reader.ReadString('\n')
+				if len(input) > 0 && input[0] == 'q' {
+					gameOver = true
+				} else {
+					player.Level++
+					player.X = 0
+					player.Y = 0
+					player.Kills = 0
+				}
+			}
+		}
 		fmt.Print("\n按回车重新开始，输入q退出: ")
 		input, _ := reader.ReadString('\n')
 		if len(input) > 0 && input[0] == 'q' {
@@ -57,36 +90,27 @@ func main() {
 	}
 }
 
-func runGame() {
-	player := Player{
-		HP: 50, MaxHP: 50,
-		ATK: 10, DEF: 5,
-		Gold: 0, Kills: 0,
-		X: 0, Y: 0,
-	}
-
-	gameMap := generateMap()
+func runLevel(player *Player) bool {
+	gameMap := generateMap(player.Level)
 	totalMonsters := countMonsters(gameMap)
 	origMonsters := totalMonsters
 
 	for {
 		clearScreen()
-		printStatus(player, totalMonsters, origMonsters)
-		printMap(gameMap, player)
+		printStatus(*player, totalMonsters, origMonsters)
+		printMap(gameMap, *player)
 
 		if totalMonsters == 0 {
-			printWin(player)
-			return
+			return true
 		}
 		if player.HP <= 0 {
-			printLose(player)
-			return
+			return false
 		}
 		printControls()
 
 		move := readMove()
 		if move == 'q' {
-			return
+			return false
 		}
 
 		nx, ny := player.X, player.Y
@@ -114,20 +138,22 @@ func runGame() {
 			switch tile.Type {
 			case TileMonster:
 				monster := generateMonster()
-				killed := combat(&player, monster)
+				killed := combat(player, monster)
 				if killed {
 					totalMonsters--
 				}
 			case TileChest:
-				openChest(&player)
+				openChest(player)
 			case TileTrap:
-				triggerTrap(&player)
+				triggerTrap(player)
+			case TileFountain:
+				UseFountain(player)
 			}
 		}
 	}
 }
 
-func generateMap() [MapSize][MapSize]Tile {
+func generateMap(level int) [MapSize][MapSize]Tile {
 	var m [MapSize][MapSize]Tile
 	for y := 0; y < MapSize; y++ {
 		for x := 0; x < MapSize; x++ {
@@ -136,13 +162,15 @@ func generateMap() [MapSize][MapSize]Tile {
 	}
 	m[0][0].Visited = true
 
-	numMonsters := 10
-	numChests := 6
-	numTraps := 6
+	numMonsters := GetMonsterCount(level)
+	numChests := 5
+	numTraps := 5
+	numFountains := 2
 
 	placeRandom(&m, TileMonster, numMonsters)
 	placeRandom(&m, TileChest, numChests)
 	placeRandom(&m, TileTrap, numTraps)
+	placeRandom(&m, TileFountain, numFountains)
 	return m
 }
 
@@ -180,8 +208,8 @@ func clearScreen() {
 func printStatus(p Player, remaining, total int) {
 	hpBar := makeBar(p.HP, p.MaxHP)
 	fmt.Println("╔══════════════════════════════════════════════════════════════════════════════╗")
-	fmt.Printf("║ HP: %3d/%3d %s  ATK:%2d  DEF:%2d  │ 金币:%3d  │ 杀怪:%2d/%2d ║\n",
-		p.HP, p.MaxHP, hpBar, p.ATK, p.DEF, p.Gold, p.Kills, total)
+	fmt.Printf("║ 第%d关  HP: %3d/%3d %s  ATK:%2d  DEF:%2d  │ 金币:%3d  │ 杀怪:%2d/%2d ║\n",
+		p.Level, p.HP, p.MaxHP, hpBar, p.ATK, p.DEF, p.Gold, p.Kills, total)
 	fmt.Println("╚══════════════════════════════════════════════════════════════════════════════╝")
 }
 
@@ -228,6 +256,8 @@ func printMap(m [MapSize][MapSize]Tile, p Player) {
 					c = "□"
 				case TileTrap:
 					c = "~"
+				case TileFountain:
+					c = "≈"
 				case TileEmpty:
 					c = "·"
 				}
@@ -244,7 +274,7 @@ func printMap(m [MapSize][MapSize]Tile, p Player) {
 	}
 	fmt.Println("+")
 	fmt.Println()
-	fmt.Println("  @=你   ?=未知   ·=空地   ✗=怪物   □=宝箱   ~=陷阱")
+	fmt.Println("  @=你   ?=未知   ·=空地   ✗=怪物   □=宝箱   ~=陷阱   ≈=泉水")
 	fmt.Println()
 }
 
@@ -269,25 +299,37 @@ func generateMonster() *Monster {
 	n := names[rand.Intn(len(names))]
 	lvl := rand.Intn(3)
 	hp := 8 + lvl*6 + rand.Intn(6)
+	atk := 5 + lvl*3 + rand.Intn(4)
 	return &Monster{
-		Name: n,
-		HP:   hp,
-		Max:  hp,
-		ATK:  5 + lvl*3 + rand.Intn(4),
-		Gold: 5 + lvl*5 + rand.Intn(10),
+		Name:    n,
+		HP:      hp,
+		Max:     hp,
+		ATK:     atk,
+		BaseATK: atk,
+		Gold:    5 + lvl*5 + rand.Intn(10),
+		Rage:    0,
 	}
 }
 
 func combat(p *Player, m *Monster) bool {
-	skillCD := 0
 	for {
 		clearScreen()
 		p.Defending = false
-		printCombatStatus(p, m, skillCD)
+
+		DecreaseCooldowns(p)
+		if m.Rage > 0 {
+			m.Rage--
+			if m.Rage == 0 {
+				m.ATK = m.BaseATK
+			}
+		}
+
+		printCombatStatus(p, m)
 		if m.HP <= 0 {
 			fmt.Printf("  你击败了%s！获得%d金币！\n", m.Name, m.Gold)
 			p.Gold += m.Gold
 			p.Kills++
+			p.HeavyActive = false
 			fmt.Println("  按回车继续...")
 			reader.ReadString('\n')
 			return true
@@ -295,41 +337,78 @@ func combat(p *Player, m *Monster) bool {
 		if p.HP <= 0 {
 			return false
 		}
-		fmt.Print("  选择行动 (1=攻击 2=防御 3=技能): ")
+
+		fmt.Println("  1=攻击  2=防御  3=技能")
+		fmt.Print("  选择行动: ")
 		choice, _ := reader.ReadString('\n')
-		playerDmg := 0
+		if len(choice) == 0 {
+			continue
+		}
+
 		playerMsg := ""
-		switch {
-		case len(choice) > 0 && choice[0] == '1':
-			playerDmg = max(1, p.ATK+rand.Intn(4)-1)
-			playerMsg = fmt.Sprintf("  你挥剑砍向%s，造成%d点伤害！", m.Name, playerDmg)
-		case len(choice) > 0 && choice[0] == '2':
+		turnDamage := 0
+		skipMonsterTurn := false
+
+		switch choice[0] {
+		case '1':
+			atk := p.ATK
+			if p.HeavyActive {
+				atk *= Skills["heavy"].Value
+				p.HeavyActive = false
+			}
+			turnDamage = max(1, atk+rand.Intn(4)-1)
+			m.HP -= turnDamage
+			if m.HP < 0 {
+				m.HP = 0
+			}
+			playerMsg = fmt.Sprintf("  你挥剑砍向%s，造成%d点伤害！", m.Name, turnDamage)
+		case '2':
 			p.Defending = true
 			playerMsg = "  你举起盾牌进行防御！"
-		case len(choice) > 0 && choice[0] == '3':
-			if skillCD > 0 {
-				fmt.Printf("  技能冷却中！(%d回合)\n", skillCD)
+		case '3':
+			skillKey := showSkillMenu(p)
+			if skillKey == "" {
+				continue
+			}
+			result := UseSkill(p, m, skillKey)
+			if result.Damage == 0 && result.Heal == 0 && !result.HeavyNextTurn {
+				fmt.Println(" ", result.Message)
 				fmt.Println("  按回车继续...")
 				reader.ReadString('\n')
 				continue
 			}
-			playerDmg = max(1, p.ATK*2+rand.Intn(6))
-			skillCD = 3
-			playerMsg = fmt.Sprintf("  ⚡ 发动必杀技！对%s造成%d点暴击伤害！", m.Name, playerDmg)
+			playerMsg = result.Message
+			if result.HeavyNextTurn {
+				p.HeavyActive = true
+			}
+			if result.PierceThisTurn {
+				skipMonsterTurn = false
+			}
 		default:
 			continue
 		}
-		if playerDmg > 0 {
-			m.HP -= playerDmg
-			if m.HP < 0 {
-				m.HP = 0
-			}
-		}
+
 		fmt.Println(playerMsg)
 		if m.HP <= 0 {
 			fmt.Printf("  %s倒下了！\n", m.Name)
+			fmt.Println("  按回车继续...")
+			reader.ReadString('\n')
 			continue
 		}
+
+		if skipMonsterTurn {
+			fmt.Println("  按回车继续...")
+			reader.ReadString('\n')
+			continue
+		}
+
+		justRaged := false
+		if m.Rage == 0 && m.HP < m.Max/2 && rand.Intn(100) < 30 {
+			m.Rage = 2
+			m.ATK = m.BaseATK * 2
+			justRaged = true
+		}
+
 		monsterDmg := max(1, m.ATK-p.DEF/2+rand.Intn(4)-1)
 		if p.Defending {
 			monsterDmg = max(0, monsterDmg/2)
@@ -338,72 +417,81 @@ func combat(p *Player, m *Monster) bool {
 		if p.HP < 0 {
 			p.HP = 0
 		}
+
+		if justRaged {
+			fmt.Printf("  %s%s进入狂暴状态！攻击力翻倍！%s\n", red, m.Name, reset)
+		}
 		defText := ""
 		if p.Defending {
 			defText = " (防御减半)"
 		}
 		fmt.Printf("  %s攻击你，造成%d点伤害！%s\n", m.Name, monsterDmg, defText)
-		if skillCD > 0 {
-			skillCD--
-		}
+
 		fmt.Println("  按回车继续...")
 		reader.ReadString('\n')
 	}
 }
 
-func printCombatStatus(p *Player, m *Monster, cd int) {
-	hpBar := makeBar(p.HP, p.MaxHP)
-	mhpBar := makeBar(m.HP, m.Max)
-	fmt.Println("╔══════════════════════════════════════════════════════════════════════════════╗")
-	fmt.Printf("║ %s  HP: %2d/%2d %s  ATK:%2d         ║\n", pad(m.Name, 6), m.HP, m.Max, mhpBar, m.ATK)
-	fmt.Printf("║ 你的 HP: %3d/%3d %s  ATK:%2d  DEF:%2d  技能CD:%d        ║\n",
-		p.HP, p.MaxHP, hpBar, p.ATK, p.DEF, cd)
-	fmt.Println("╚══════════════════════════════════════════════════════════════════════════════╝")
+func showSkillMenu(p *Player) string {
 	fmt.Println()
-	drawMonster(m.Name)
-	fmt.Println()
+	fmt.Println("  ── 技能列表 ──")
+	keys := []string{"heavy", "heal", "pierce"}
+	labels := []string{"1", "2", "3"}
+	for i, k := range keys {
+		cfg := Skills[k]
+		cd := p.SkillCD[k]
+		cdStr := ""
+		if cd > 0 {
+			cdStr = fmt.Sprintf(" [CD:%d]", cd)
+		}
+		fmt.Printf("  %s) %s - %s%s\n", labels[i], cfg.Name, cfg.Description, cdStr)
+	}
+	fmt.Println("  0) 返回")
+	fmt.Print("  选择技能: ")
+	choice, _ := reader.ReadString('\n')
+	if len(choice) == 0 {
+		return ""
+	}
+	switch choice[0] {
+	case '1':
+		return "heavy"
+	case '2':
+		return "heal"
+	case '3':
+		return "pierce"
+	default:
+		return ""
+	}
 }
 
-func drawMonster(name string) {
-	arts := map[string][]string{
-		"史莱姆": {
-			"     .-.     ",
-			"    (o o)    ",
-			"   > ^ <    ",
-			"   '---'    ",
-		},
-		"哥布林": {
-			"    .--.    ",
-			"   / 0  \\   ",
-			"  |  ^  |   ",
-			"   \\ - /   ",
-			"    'v'     ",
-		},
-		"骷髅兵": {
-			"    +-+     ",
-			"   (o.o)    ",
-			"    |=|     ",
-			"   /   \\   ",
-		},
-		"蝙蝠群": {
-			"  \\/\\/\\/\\  ",
-			"  /\\/\\/\\/  ",
-			"  \\/\\/\\/\\  ",
-		},
-		"狼人": {
-			"   ,;;;,    ",
-			"  ( o o )   ",
-			"   ) ^ (    ",
-			"  /|   |\\  ",
-		},
+func printCombatStatus(p *Player, m *Monster) {
+	hpBar := makeBar(p.HP, p.MaxHP)
+	mhpBar := makeBar(m.HP, m.Max)
+	rageText := ""
+	if m.Rage > 0 {
+		rageText = fmt.Sprintf(" %s[狂暴:%d]%s", red, m.Rage, reset)
 	}
-	art, ok := arts[name]
-	if !ok {
-		art = arts["史莱姆"]
+	fmt.Println("╔══════════════════════════════════════════════════════════════════════════════╗")
+	fmt.Printf("║ %s  HP: %2d/%2d %s  ATK:%2d %s║\n", pad(m.Name, 6), m.HP, m.Max, mhpBar, m.ATK, rageText)
+	skillCdLine := ""
+	for k, cfg := range Skills {
+		cd := p.SkillCD[k]
+		if cd > 0 {
+			skillCdLine += fmt.Sprintf("%s:%d ", cfg.Name, cd)
+		}
 	}
-	for _, line := range art {
-		fmt.Printf("       %s\n", line)
+	if skillCdLine == "" {
+		skillCdLine = "就绪"
 	}
+	if p.HeavyActive {
+		skillCdLine += " [重击就绪]"
+	}
+	fmt.Printf("║ 你的 HP: %3d/%3d %s  ATK:%2d  DEF:%2d  CD:%s║\n",
+		p.HP, p.MaxHP, hpBar, p.ATK, p.DEF, skillCdLine)
+	fmt.Println("╚══════════════════════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+	DrawMonsterRage(m.Name, m.Rage > 0)
+	fmt.Println()
 }
 
 func pad(s string, n int) string {
@@ -446,20 +534,6 @@ func triggerTrap(p *Player) {
 	fmt.Println()
 	fmt.Println("  按回车继续...")
 	reader.ReadString('\n')
-}
-
-func printWin(p Player) {
-	fmt.Println()
-	fmt.Println("  ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★")
-	fmt.Println("  ★                                       ★")
-	fmt.Println("  ★           通 关 胜 利 ！               ★")
-	fmt.Println("  ★                                       ★")
-	fmt.Println("  ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★")
-	fmt.Printf("  ★  击杀怪物: %2d 只                       ★\n", p.Kills)
-	fmt.Printf("  ★  获得金币: %3d 枚                       ★\n", p.Gold)
-	fmt.Println("  ★                                       ★")
-	fmt.Println("  ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★")
-	fmt.Println()
 }
 
 func printLose(p Player) {
