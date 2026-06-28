@@ -24,7 +24,9 @@ func Combat(p *Player, m *Monster) bool {
 
 		printCombatStatus(p, m)
 		if m.HP <= 0 {
-			fmt.Printf("  你击败了%s！获得%d金币！\n", m.Name, m.Gold)
+			// 修复3: 金币显示后主动flush，避免某些终端时序问题导致不显示
+			fmt.Printf("  💰  你击败了%s！获得%d金币！\n", m.Name, m.Gold)
+			os.Stdout.Sync()
 			p.Gold += m.Gold
 			p.Kills++
 			p.HeavyActive = false
@@ -60,8 +62,9 @@ func Combat(p *Player, m *Monster) bool {
 			}
 			playerMsg = fmt.Sprintf("  你挥剑砍向%s，造成%d点伤害！", m.Name, turnDamage)
 		case '2':
+			// 修复1: 防御是本回合生效，提示说清楚避免误解
 			p.Defending = true
-			playerMsg = "  你举起盾牌进行防御！"
+			playerMsg = "  🛡  你举起盾牌防御！本回合受到伤害减半"
 		case '3':
 			skillKey := showSkillMenu(p)
 			if skillKey == "" {
@@ -107,7 +110,8 @@ func Combat(p *Player, m *Monster) bool {
 		}
 
 		if justRaged {
-			fmt.Printf("  %s%s进入狂暴状态！攻击力翻倍！%s\n", red, m.Name, reset)
+			// 修复4: 颜色通过color()函数，不支持ANSI的终端自动降级
+			fmt.Printf("  %s%s进入狂暴状态！攻击力翻倍！%s\n", color(red), m.Name, color(reset))
 		}
 		defText := ""
 		if p.Defending {
@@ -156,7 +160,8 @@ func printCombatStatus(p *Player, m *Monster) {
 	mhpBar := makeBar(m.HP, m.Max)
 	rageText := ""
 	if m.Rage > 0 {
-		rageText = fmt.Sprintf(" %s[狂暴:%d]%s", red, m.Rage, reset)
+		// 修复4: 颜色通过color()函数降级
+		rageText = fmt.Sprintf(" %s[狂暴:%d]%s", color(red), m.Rage, color(reset))
 	}
 	fmt.Println("╔══════════════════════════════════════════════════════════════════════════════╗")
 	fmt.Printf("║ %s  HP: %2d/%2d %s  ATK:%2d %s║\n", pad(m.Name, 6), m.HP, m.Max, mhpBar, m.ATK, rageText)

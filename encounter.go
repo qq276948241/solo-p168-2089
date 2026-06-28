@@ -90,13 +90,14 @@ func DrawMonsterRage(name string, raging bool) {
 	}
 	for _, line := range art {
 		if raging {
-			fmt.Printf("       %s%s%s\n", red, line, reset)
+			// 修复4: 颜色通过color()函数降级
+			fmt.Printf("       %s%s%s\n", color(red), line, color(reset))
 		} else {
 			fmt.Printf("       %s\n", line)
 		}
 	}
 	if raging {
-		fmt.Printf("       %s【狂暴中！攻击力x2】%s\n", red, reset)
+		fmt.Printf("       %s【狂暴中！攻击力x2】%s\n", color(red), color(reset))
 	}
 }
 
@@ -149,17 +150,17 @@ func PrintGrade(p Player, level int) {
 	gradeColor := ""
 	switch grade {
 	case "S":
-		gradeColor = "\033[33m"
+		gradeColor = color("\033[33m")
 	case "A":
-		gradeColor = "\033[32m"
+		gradeColor = color("\033[32m")
 	case "B":
-		gradeColor = "\033[36m"
+		gradeColor = color("\033[36m")
 	case "C":
-		gradeColor = "\033[34m"
+		gradeColor = color("\033[34m")
 	default:
-		gradeColor = "\033[37m"
+		gradeColor = color("\033[37m")
 	}
-	reset := "\033[0m"
+	resetCode := color("\033[0m")
 
 	fmt.Println()
 	fmt.Println("  ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★")
@@ -170,7 +171,7 @@ func PrintGrade(p Player, level int) {
 	fmt.Printf("  ★  剩余血量: %d/%d                       ★\n", p.HP, p.MaxHP)
 	fmt.Printf("  ★  获得金币: %3d 枚                       ★\n", p.Gold)
 	fmt.Println("  ★                                       ★")
-	fmt.Printf("  ★              评价: %s%s%s                  ★\n", gradeColor, grade, reset)
+	fmt.Printf("  ★              评价: %s%s%s                  ★\n", gradeColor, grade, resetCode)
 	fmt.Println("  ★                                       ★")
 	fmt.Println("  ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★")
 	fmt.Println()

@@ -8,6 +8,27 @@ import (
 	"time"
 )
 
+// 修复4: ANSI颜色终端检测，不支持则降级为纯文本
+var useANSI = detectANSI()
+
+func detectANSI() bool {
+	term := os.Getenv("TERM")
+	if term == "dumb" || term == "" {
+		return false
+	}
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	return true
+}
+
+func color(code string) string {
+	if useANSI {
+		return code
+	}
+	return ""
+}
+
 const (
 	MapSize = 8
 )
@@ -134,6 +155,32 @@ func runLevel(player *Player) bool {
 
 		tile := &gameMap[ny][nx]
 		if !tile.Visited {
+			// 修复2: 泉水格子特殊处理 - 先判断是否满血，不满血才标记Visited
+			// 否则满血踩泉水会浪费格子，玩家以后血量低了还能再来
+			if tile.Type == TileFountain {
+				if player.HP >= player.MaxHP {
+					fmt.Println()
+					fmt.Println("  ══════════════════════════════════════════════")
+					fmt.Println("  💧 发现清澈的泉水...但你已是满血状态")
+					fmt.Println("  ══════════════════════════════════════════════")
+					fmt.Println()
+					fmt.Println("  按回车继续...")
+					reader.ReadString('\n')
+					continue // 不标记Visited，保留格子
+				}
+				tile.Visited = true
+				healed := player.MaxHP - player.HP
+				player.HP = player.MaxHP
+				fmt.Println()
+				fmt.Println("  ══════════════════════════════════════════════")
+				fmt.Println("  💧 发现清澈的泉水！沁人心脾！")
+				fmt.Printf("  💧 生命值完全恢复！(+%d HP)\n", healed)
+				fmt.Println("  ══════════════════════════════════════════════")
+				fmt.Println()
+				fmt.Println("  按回车继续...")
+				reader.ReadString('\n')
+				continue
+			}
 			tile.Visited = true
 			switch tile.Type {
 			case TileMonster:
@@ -146,8 +193,6 @@ func runLevel(player *Player) bool {
 				openChest(player)
 			case TileTrap:
 				triggerTrap(player)
-			case TileFountain:
-				UseFountain(player)
 			}
 		}
 	}
